@@ -310,8 +310,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       clearInterval(presenceInterval)
-      // Set offline only when component unmounts (user logs out)
-      updateUserOnlineStatus(user.id, false)
+      // DO NOT set offline on component unmount (tab close/refresh)
+      // Online status should persist until user explicitly logs out
     }
   }, [user])
 
