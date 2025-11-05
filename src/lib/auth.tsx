@@ -107,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Add visibility change listener to verify session when tab becomes visible
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
-        console.log('Tab became visible, verifying session...')
+        console.log('👁️ [VISIBILITY] Tab became visible, verifying session...')
         
         // Use a shorter timeout for visibility checks - 2 seconds max
         const visibilityTimeout = new Promise((_, reject) => {
@@ -147,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
             } else if (!session && user) {
               // Session lost, clear user state
-              console.log('Session lost, logging out...')
+              console.log('⚠️ [VISIBILITY] Session lost, logging out...')
               setSession(null)
               setUser(null)
               setProfile(null)
@@ -164,6 +164,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         Promise.race([visibilityCheck(), visibilityTimeout]).catch(error => {
           console.log('Visibility check failed or timed out:', error.message)
         })
+      } else if (document.visibilityState === 'hidden') {
+        console.log('👁️ [VISIBILITY] Tab became hidden - NOT changing online status (should persist)')
+        // Do NOT change online status when tab becomes hidden - status should persist
       }
     }
 
@@ -280,6 +283,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Global online status management
   async function updateUserOnlineStatus(userId: string, isOnline: boolean) {
     try {
+      console.log(`🔄 [ONLINE STATUS UPDATE] User ${userId} → ${isOnline ? 'ONLINE' : 'OFFLINE'} (at ${new Date().toISOString()})`)
+      
       await supabase
         .from('profiles')
         .update({ 
@@ -287,8 +292,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           last_seen: new Date().toISOString() 
         })
         .eq('id', userId)
+      
+      console.log(`✅ [ONLINE STATUS] Successfully updated user ${userId} status to ${isOnline ? 'ONLINE' : 'OFFLINE'}`)
     } catch (error) {
-      console.error('Error updating user online status:', error)
+      console.error('❌ [ONLINE STATUS ERROR] Error updating user online status:', error)
     }
   }
 
@@ -301,6 +308,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Set up periodic updates every 30 seconds to keep status fresh and update last_seen
     const presenceInterval = setInterval(() => {
+      console.log(`🔄 [PRESENCE] Periodic status refresh for user ${user.id}`)
       updateUserOnlineStatus(user.id, true)
     }, 30000)
 
