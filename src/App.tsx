@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import { ThemeProvider } from '@/lib/theme'
+import { AnalyticsProvider } from '@/lib/analytics'
 import { CompanyNameProvider } from '@/contexts/CompanyNameContext'
 import { NotificationProvider } from '@/contexts/NotificationContext'
 import { useToast } from '@/components/Toast'
@@ -14,9 +15,12 @@ import { Settings } from '@/components/Settings'
 import { ProfilePage } from '@/components/ProfilePage'
 import { NotificationsPage } from '@/components/NotificationsPage'
 import { MessagesPage } from '@/components/MessagesPage'
+import { Analytics } from '@/components/Analytics'
+import { Reports } from '@/components/Reports'
 import { GlobalNotifications } from '@/components/GlobalNotifications'
 import { Footer } from '@/components/Footer'
 import { CheckCircle } from 'lucide-react'
+import { useFavicon } from '@/hooks/useFavicon'
 import '@/lib/i18n'
 
 // Toast Container Component
@@ -28,6 +32,9 @@ function ToastContainerWrapper() {
 function AppContent() {
   const { user, loading } = useAuth()
   const [sidebarOpen, setSidebarOpen] = React.useState(false)
+
+  // Initialize favicon management
+  useFavicon()
 
   if (loading) {
     return (
@@ -95,44 +102,21 @@ function AppContent() {
 }
 
 // Placeholder components for sections not yet implemented
-function Analytics() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Analytics</h1>
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
-        <p className="text-center text-gray-500 dark:text-gray-400">
-          Analytics dashboard coming soon...
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function Reports() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Reports</h1>
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
-        <p className="text-center text-gray-500 dark:text-gray-400">
-          Reports section coming soon...
-        </p>
-      </div>
-    </div>
-  )
-}
 
 function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CompanyNameProvider>
-          <NotificationProvider>
-            <Router>
-              <AppContent />
-              <ToastContainerWrapper />
-            </Router>
-          </NotificationProvider>
-        </CompanyNameProvider>
+        <AnalyticsProvider>
+          <CompanyNameProvider>
+            <NotificationProvider>
+              <Router>
+                <AppContent />
+                <ToastContainerWrapper />
+              </Router>
+            </NotificationProvider>
+          </CompanyNameProvider>
+        </AnalyticsProvider>
       </AuthProvider>
     </ThemeProvider>
   )
