@@ -55,7 +55,7 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
     }
   }, [isOpen, user])
 
-  // Set up real-time subscriptions for notifications
+  // Set up real-time subscriptions for notifications and domain changes
   useEffect(() => {
     if (!user) return
 
@@ -77,10 +77,41 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
       })
       .subscribe()
 
+    // Set up real-time subscription for domain changes
+    const domainSubscription = supabase
+      .channel('domains-dropdown')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'domains'
+      }, (payload) => {
+        console.log('Domain change detected in dropdown:', payload)
+        if (isOpen) {
+          // Refresh notifications when domains change
+          loadNotifications()
+        }
+      })
+      .subscribe()
+
+    // Listen for cross-component domain update events
+    const handleDomainDataChanged = () => {
+      if (isOpen) {
+        loadNotifications()
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('domainDataChanged', handleDomainDataChanged)
+    }
+
     return () => {
       notificationSubscription.unsubscribe()
+      domainSubscription.unsubscribe()
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('domainDataChanged', handleDomainDataChanged)
+      }
     }
-  }, [user, isOpen, refreshNotificationData])
+  }, [user, isOpen])
 
   useEffect(() => {
     // Close dropdown when clicking outside
@@ -104,6 +135,13 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
 
     try {
       setLoading(true)
+      // Clear cache and notify other components of data refresh
+      cacheManager.invalidateOnDataChange('notifications', 'REFRESH')
+      
+      if (typeof window !== 'undefined') {
+        const event = new CustomEvent('refreshNotificationData')
+        window.dispatchEvent(event)
+      }
       
       // Load notifications
       const { data, error, count } = await supabase
@@ -129,17 +167,69 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
         return
       }
 
-      // Sort notifications with comment priority
-      const sortedNotifications = (data || []).sort((a, b) => {
+      // Sort notifications with custom logic
+      const sortedNotifications = await Promise.all((data || []).map(async (notification) => {
+        // For domain expiry notifications, extract days remaining from content
+        if (notification.type === 'domain_expiry') {
+          try {
+            // Extract days from content like "will expire in 86 days on 1/26/2026"
+            const daysMatch = notification.content.match(/will expire in (\d+) days/i)
+            if (daysMatch && daysMatch[1]) {
+              const daysRemaining = parseInt(daysMatch[1], 10)
+              
+              // Calculate sort date: smaller days = more urgent = earlier in list
+              // We want to sort so 15 days comes before 75 days
+              const now = new Date()
+              const sortDate = now.getTime() + (daysRemaining * 24 * 60 * 60 * 1000)
+              
+              return {
+                ...notification,
+                _sortDate: sortDate,
+                _daysRemaining: daysRemaining
+              }
+            }
+          } catch (domainError) {
+            console.warn('Could not parse days from notification:', domainError)
+          }
+        }
+        
+        // Default sorting by created_at for comments and other types
+        return {
+          ...notification,
+          _sortDate: new Date(notification.created_at).getTime()
+        }
+      }))
+
+      // Sort the notifications
+      const finalSorted = sortedNotifications.sort((a, b) => {
+        const sortA = a._sortDate || 0
+        const sortB = b._sortDate || 0
+        
         // Comments always go first (highest priority)
         if (a.type === 'comment' && b.type !== 'comment') return -1
         if (a.type !== 'comment' && b.type === 'comment') return 1
         
+        // For domain expiry notifications, sort by urgency (fewer days = more urgent)
+        if (a.type === 'domain_expiry' && b.type === 'domain_expiry') {
+          // Check if both have days remaining data
+          const aDays = (a as any)._daysRemaining
+          const bDays = (b as any)._daysRemaining
+          
+          if (aDays !== undefined && bDays !== undefined) {
+            return aDays - bDays
+          }
+          // Fallback to sort date
+          return sortA - sortB
+        }
+        
         // Other notification types by created_at
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        return sortA - sortB
       })
 
-      setNotifications(sortedNotifications)
+      // Remove the temporary _sortDate property
+      const cleanNotifications = finalSorted.map(({ _sortDate, ...notification }) => notification)
+
+      setNotifications(cleanNotifications)
       setTotalCount(count || 0)
     } catch (error) {
       console.error('Error loading notifications:', error)
@@ -206,6 +296,16 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
       )
     } catch (error) {
       console.error('Error dismissing all notifications:', error)
+    }
+  }
+
+  const getDomainUrgencyColor = (daysRemaining: number) => {
+    if (daysRemaining < 30) {
+      return 'bg-red-500' // Red for urgent (under 30 days)
+    } else if (daysRemaining < 60) {
+      return 'bg-orange-500' // Orange for warning (30-60 days)
+    } else {
+      return 'bg-green-400' // Light green for info (60-90 days)
     }
   }
 
@@ -304,8 +404,19 @@ export function NotificationDropdown({ isOpen, onClose }: NotificationDropdownPr
                 onClick={() => handleNotificationClick(notification)}
               >
                 <div className="flex items-start space-x-3">
-                  <div className="flex-shrink-0 mt-1">
+                  <div className="flex-shrink-0 mt-1 relative">
                     {getNotificationIcon(notification.type)}
+                    {/* Domain urgency indicator */}
+                    {notification.type === 'domain_expiry' && (() => {
+                      const daysMatch = notification.content.match(/will expire in (\d+) days/i)
+                      if (daysMatch && daysMatch[1]) {
+                        const daysRemaining = parseInt(daysMatch[1], 10)
+                        return (
+                          <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${getDomainUrgencyColor(daysRemaining)}`}></span>
+                        )
+                      }
+                      return null
+                    })()}
                   </div>
                   
                   <div className="flex-1 min-w-0">
