@@ -67,8 +67,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 console.error('Profile loading failed:', error)
                 // Don't block UI for profile loading failures
               })
-              // Update online status when logging in
-              updateUserOnlineStatus(session.user.id, true)
+              
+              // Check for cached online status and restore it
+              const cachedStatus = getCachedOnlineStatus()
+              if (cachedStatus && cachedStatus.userId === session.user.id) {
+                console.log('🔄 [SESSION] Restoring cached online status:', cachedStatus.isOnline ? 'ONLINE' : 'OFFLINE')
+                updateCachedOnlineStatus(session.user.id, true) // Always restore to online on session load
+                updateUserOnlineStatus(session.user.id, true)
+              } else {
+                // Update online status when logging in
+                updateCachedOnlineStatus(session.user.id, true)
+                updateUserOnlineStatus(session.user.id, true)
+              }
             }
           }
         }
@@ -85,8 +95,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     getInitialSession()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        console.log('Auth state changed:', _event)
+      async (event, session) => {
+        console.log('🔄 [AUTH STATE CHANGED]', event, session ? 'Session exists' : 'Session lost')
+        console.log(`📍 [AUTH CALLER] Event triggered from: ${new Error().stack?.split('\n')[2]?.trim() || 'Unknown'}`)
+        
         setSession(session)
         setUser(session?.user || null)
         
@@ -95,21 +107,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loadProfileWithCache(session.user.id).catch(error => {
             console.error('Profile loading failed after auth change:', error)
           })
-          // Update online status when auth state changes to logged in
-          updateUserOnlineStatus(session.user.id, true)
+          // Check for cached online status and restore it
+          const cachedStatus = getCachedOnlineStatus()
+          if (cachedStatus && cachedStatus.userId === session.user.id) {
+            console.log('🔄 [AUTH STATE] Restoring cached online status:', cachedStatus.isOnline ? 'ONLINE' : 'OFFLINE')
+            updateCachedOnlineStatus(session.user.id, true) // Always restore to online on session restore
+            updateUserOnlineStatus(session.user.id, true)
+          } else {
+            // Update online status when auth state changes to logged in
+            console.log('🔄 [AUTH STATE] Setting user ONLINE due to session restored')
+            updateCachedOnlineStatus(session.user.id, true)
+            updateUserOnlineStatus(session.user.id, true)
+          }
         } else {
+          // Session lost - this could be tab closure, refresh, or explicit logout
+          // Only clear profile, don't change online status automatically
+          // Online status should persist across tab closures and browser refreshes
+          console.log('🔄 [AUTH STATE] Session lost - clearing profile but keeping online status')
+          console.log('🔄 [AUTH STATE] NOT calling updateUserOnlineStatus for session loss (status should persist)')
           setProfile(null)
         }
         setLoading(false)
       }
     )
 
-    // Add visibility change listener to verify session when tab becomes visible
+    // Add visibility change listener to update online status based on tab visibility
     const handleVisibilityChange = async () => {
       if (document.visibilityState === 'visible') {
-        console.log('👁️ [VISIBILITY] Tab became visible, verifying session...')
+        console.log('👁️ [VISIBILITY] Tab became visible - setting user ONLINE')
         
-        // Use a shorter timeout for visibility checks - 2 seconds max
+        // Set user online when tab becomes visible
+        if (user) {
+          // Update local cache first
+          updateCachedOnlineStatus(user.id, true)
+          
+          // Then update database
+          updateUserOnlineStatus(user.id, true)
+        }
+        
+        // Also verify session when tab becomes visible
         const visibilityTimeout = new Promise((_, reject) => {
           setTimeout(() => reject(new Error('Visibility check timeout')), 2000)
         })
@@ -126,9 +162,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               // Update session data quickly
               setSession(session)
               setUser(session.user)
-              
-              // Ensure online status is maintained when tab becomes visible again
-              updateUserOnlineStatus(session.user.id, true)
               
               // Smart cache check - only reload if cache is expired or missing
               const cachedProfile = cacheManager.get('profile') as Profile | null
@@ -153,6 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setProfile(null)
               // Clear profile cache
               cacheManager.invalidate('profile')
+              // Clear online status cache
+              localStorage.removeItem('regina_online_status')
             }
           } catch (error) {
             console.error('Error in visibility change handler:', error)
@@ -165,16 +200,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.log('Visibility check failed or timed out:', error.message)
         })
       } else if (document.visibilityState === 'hidden') {
-        console.log('👁️ [VISIBILITY] Tab became hidden - NOT changing online status (should persist)')
-        // Do NOT change online status when tab becomes hidden - status should persist
+        console.log('👁️ [VISIBILITY] Tab became hidden - setting user OFFLINE')
+        // Set user offline when tab becomes hidden
+        if (user) {
+          // Update local cache first
+          updateCachedOnlineStatus(user.id, false)
+          
+          // Use sendBeacon for reliable database update
+          sendOfflineStatus(user.id)
+        }
+      }
+    }
+
+    // Add beforeunload handler to ensure offline status is sent when tab closes
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      console.log('🚪 [BEFORE UNLOAD] Tab closing, marking user temporarily offline')
+      if (user) {
+        // Update local cache first
+        updateCachedOnlineStatus(user.id, false)
+        
+        // Use sendBeacon to ensure offline status is sent even if browser terminates
+        sendOfflineStatus(user.id)
+        
+        console.log('✅ [BEFORE UNLOAD] Temporary offline status cached and sent')
       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('beforeunload', handleBeforeUnload)
 
     return () => {
       subscription.unsubscribe()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
     }
   }, [])
 
@@ -280,11 +338,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return loadProfileWithCache(userId, retryCount)
   }
 
-  // Global online status management
-  async function updateUserOnlineStatus(userId: string, isOnline: boolean) {
+  // Session management for persistent online status
+  const getSessionId = () => {
+    let sessionId = localStorage.getItem('regina_session_id')
+    if (!sessionId) {
+      sessionId = crypto.randomUUID()
+      localStorage.setItem('regina_session_id', sessionId)
+    }
+    return sessionId
+  }
+
+  // Get cached online status from localStorage
+  const getCachedOnlineStatus = () => {
     try {
-      console.log(`🔄 [ONLINE STATUS UPDATE] User ${userId} → ${isOnline ? 'ONLINE' : 'OFFLINE'} (at ${new Date().toISOString()})`)
+      const cached = localStorage.getItem('regina_online_status')
+      return cached ? JSON.parse(cached) : null
+    } catch {
+      return null
+    }
+  }
+
+  // Update cached online status in localStorage
+  const updateCachedOnlineStatus = (userId: string, isOnline: boolean) => {
+    const statusData = {
+      userId,
+      isOnline,
+      lastSeen: new Date().toISOString(),
+      sessionId: getSessionId()
+    }
+    localStorage.setItem('regina_online_status', JSON.stringify(statusData))
+    console.log(`💾 [CACHE] Updated online status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`)
+  }
+
+  // Reliable offline status update using sendBeacon
+  async function sendOfflineStatus(userId: string) {
+    if (typeof navigator.sendBeacon !== 'function') return false
+    
+    try {
+      const data = {
+        is_online: false,
+        last_seen: new Date().toISOString()
+      }
       
+      const beaconUrl = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}`
+      const beaconPayload = JSON.stringify(data)
+      
+      const beaconSent = navigator.sendBeacon(
+        beaconUrl,
+        new Blob([beaconPayload], { type: 'application/json' })
+      )
+      
+      console.log(`📡 [BEACON] sendBeacon result: ${beaconSent ? 'SUCCESS' : 'FAILED'}`)
+      return beaconSent
+    } catch (error) {
+      console.error('❌ [BEACON ERROR] sendBeacon failed:', error)
+      return false
+    }
+  }
+
+  // Global online status management with session-based approach
+  async function updateUserOnlineStatus(userId: string, isOnline: boolean) {
+    // Create stack trace to identify who called this function
+    const stackTrace = new Error().stack
+    const caller = stackTrace?.split('\n')[2]?.trim() || 'Unknown caller'
+    
+    console.log(`🔄 [ONLINE STATUS UPDATE] User ${userId} → ${isOnline ? 'ONLINE' : 'OFFLINE'} (at ${new Date().toISOString()})`)
+    console.log(`📍 [CALLER] Called from: ${caller}`)
+    
+    try {
+      // Update local cache first
+      updateCachedOnlineStatus(userId, isOnline)
+      
+      // Update database
       await supabase
         .from('profiles')
         .update({ 
@@ -294,8 +419,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', userId)
       
       console.log(`✅ [ONLINE STATUS] Successfully updated user ${userId} status to ${isOnline ? 'ONLINE' : 'OFFLINE'}`)
+      console.log(`📍 [CALLER] Success from: ${caller}`)
     } catch (error) {
       console.error('❌ [ONLINE STATUS ERROR] Error updating user online status:', error)
+      console.error(`📍 [CALLER] Error occurred when called from: ${caller}`)
     }
   }
 
@@ -303,23 +430,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) return
 
-    // Update user status to online on mount
-    updateUserOnlineStatus(user.id, true)
-
+    console.log(`🚀 [MOUNT] Setting up online status tracking for user ${user.id}`)
+    
     // Set up periodic updates every 30 seconds to keep status fresh and update last_seen
     const presenceInterval = setInterval(() => {
       console.log(`🔄 [PRESENCE] Periodic status refresh for user ${user.id}`)
       updateUserOnlineStatus(user.id, true)
     }, 30000)
 
-    // Only set user offline when they explicitly log out
-    // Browser refresh/close will NOT change online status - it persists until logout
-    // This ensures is_online stays true even when tab is closed and reopened
-
     return () => {
+      console.log(`📦 [UNMOUNT] Cleaning up online status tracking for user ${user.id}`)
       clearInterval(presenceInterval)
-      // DO NOT set offline on component unmount (tab close/refresh)
-      // Online status should persist until user explicitly logs out
+      // Online status is now handled by visibility changes, not unmount
     }
   }, [user])
 
@@ -379,6 +501,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Set user online immediately upon successful authentication
+      updateCachedOnlineStatus(data.user.id, true)
       await updateUserOnlineStatus(data.user.id, true)
       
       // Load profile with smart caching strategy
@@ -433,20 +556,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // State to track if logout was explicitly requested
+  const [isExplicitLogout, setIsExplicitLogout] = useState(false)
+
   async function signOut() {
-    // Set user offline before signing out
+    console.log('🚪 [SIGN OUT] User explicitly signing out (will set offline)')
+    
+    // Mark this as an explicit logout
+    setIsExplicitLogout(true)
+    
+    // Set user offline before signing out - this is expected behavior
     if (user) {
+      updateCachedOnlineStatus(user.id, false)
       await updateUserOnlineStatus(user.id, false)
     }
     
     const { error } = await supabase.auth.signOut()
     if (error) {
-      console.error('Error signing out:', error)
+      console.error('❌ [SIGN OUT ERROR] Error signing out:', error)
+    } else {
+      console.log('✅ [SIGN OUT] Successfully signed out')
     }
     setProfile(null)
-    // Clear all cached data on logout including profile cache
+    // Clear all cached data on logout including profile cache and online status
     cacheManager.invalidate('profile')
     cacheManager.clearAll()
+    localStorage.removeItem('regina_online_status')
+    localStorage.removeItem('regina_session_id')
+    
+    // Reset explicit logout flag after a short delay
+    setTimeout(() => setIsExplicitLogout(false), 1000)
   }
 
   async function updateProfile(updates: Partial<Profile>) {
