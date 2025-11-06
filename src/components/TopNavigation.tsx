@@ -5,10 +5,9 @@ import { useTheme } from '@/lib/theme'
 import { useCompanyName } from '@/contexts/CompanyNameContext'
 import { useNotificationContext } from '@/contexts/NotificationContext'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Plus, Globe, Sun, Moon, Monitor, User, LogOut, Settings, ChevronDown, Menu, AlertTriangle } from 'lucide-react'
+import { Bell, Plus, Globe, Sun, Moon, Monitor, User, LogOut, Settings, ChevronDown, Menu } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { NotificationDropdown } from '@/components/NotificationDropdown'
-import { DomainExpiryNotification } from '@/components/DomainExpiryNotification'
 import { useClickOutside } from '@/hooks/useClickOutside'
 import { supabase } from '@/lib/supabase'
 
@@ -17,20 +16,18 @@ export function TopNavigation({ onMenuClick }: { onMenuClick: () => void }) {
   const { user, profile, signOut, isAdmin } = useAuth()
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { companyName } = useCompanyName()
-  const { unreadNotificationsCount: notificationCount, expiringDomainsCount } = useNotificationContext()
+  const { unreadNotificationsCount: notificationCount } = useNotificationContext()
   const navigate = useNavigate()
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showLanguageMenu, setShowLanguageMenu] = useState(false)
   const [showThemeMenu, setShowThemeMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [showDomainExpiryNotifications, setShowDomainExpiryNotifications] = useState(false)
   
   // Refs for click outside detection
   const languageMenuRef = useRef<HTMLDivElement>(null)
   const themeMenuRef = useRef<HTMLDivElement>(null)
   const profileMenuRef = useRef<HTMLDivElement>(null)
   const notificationRef = useRef<HTMLDivElement>(null)
-  const domainExpiryNotificationRef = useRef<HTMLDivElement>(null)
   
   // Click outside handlers
   useClickOutside(languageMenuRef, {
@@ -62,21 +59,10 @@ export function TopNavigation({ onMenuClick }: { onMenuClick: () => void }) {
 
   const themeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
 
-  const handleClickOutside = (ref: React.RefObject<HTMLDivElement>, handler: () => void) => {
-    useClickOutside(ref, { onClickOutside: handler })
-  }
-
   // Close notifications when clicking outside
   useClickOutside(notificationRef, {
     onClickOutside: () => setShowNotifications(false)
   })
-
-  useClickOutside(domainExpiryNotificationRef, {
-    onClickOutside: () => setShowDomainExpiryNotifications(false)
-  })
-
-  // Company name is now managed by CompanyNameContext
-  // Notification counts are now managed by NotificationContext
 
   return (
     <nav className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
@@ -101,159 +87,132 @@ export function TopNavigation({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         </div>
 
-        {/* Right section: Actions and user menu */}
-        <div className="flex items-center space-x-4">
-          {/* Domain Expiry Notifications */}
-          <div className="relative" ref={domainExpiryNotificationRef}>
+        {/* Center section: Search and quick actions - hidden on mobile */}
+        <div className="hidden md:flex items-center space-x-4 flex-1 max-w-2xl mx-8">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder={t('nav.search')}
+              className="w-full px-4 py-2 pl-10 pr-4 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
+          
+          <button className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Right section: Language, Theme, Notifications, Profile */}
+        <div className="flex items-center space-x-2">
+          {/* Language Selector - hidden on mobile */}
+          <div className="hidden md:block" ref={languageMenuRef}>
             <button
-              onClick={() => setShowDomainExpiryNotifications(!showDomainExpiryNotifications)}
-              className="relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title="Domain Expiry Alerts"
+              onClick={() => setShowLanguageMenu(!showLanguageMenu)}
+              className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             >
-              <AlertTriangle className="w-5 h-5" />
-              {/* Domain expiry badge with count */}
-              {expiringDomainsCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 bg-orange-500 text-white text-xs rounded-full flex items-center justify-center font-semibold">
-                  {expiringDomainsCount > 99 ? '99+' : expiringDomainsCount}
-                </span>
-              )}
+              <Globe className="w-4 h-4" />
+              <span className="uppercase">{i18n.language}</span>
+              <ChevronDown className="w-4 h-4" />
             </button>
             
-            {/* Domain Expiry Notification Dropdown */}
-            <DomainExpiryNotification 
-              isOpen={showDomainExpiryNotifications}
-              onClose={() => setShowDomainExpiryNotifications(false)}
-            />
+            {showLanguageMenu && (
+              <div className="absolute right-0 mt-2 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                <div className="py-1">
+                  {['en', 'fr', 'es'].map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => handleLanguageChange(lang)}
+                      className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                        i18n.language === lang ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      <span className="uppercase">{lang}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* General Notifications */}
+          {/* Theme Selector - hidden on mobile */}
+          <div className="hidden md:block" ref={themeMenuRef}>
+            <button
+              onClick={() => setShowThemeMenu(!showThemeMenu)}
+              className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+            >
+              {React.createElement(themeIcon, { className: 'w-5 h-5' })}
+            </button>
+            
+            {showThemeMenu && (
+              <div className="absolute right-16 mt-2 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                <div className="py-1">
+                  {[
+                    { value: 'light', label: 'Light', icon: Sun },
+                    { value: 'dark', label: 'Dark', icon: Moon },
+                    { value: 'system', label: 'System', icon: Monitor },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => handleThemeChange(option.value as any)}
+                      className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2 ${
+                        theme === option.value ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {React.createElement(option.icon, { className: 'w-4 h-4' })}
+                      <span>{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Notifications */}
           <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setShowNotifications(!showNotifications)}
               className="relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title={t('nav.notifications')}
             >
               <Bell className="w-5 h-5" />
-              {/* Notification badge with count */}
               {notificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-semibold">
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
                   {notificationCount > 99 ? '99+' : notificationCount}
                 </span>
               )}
             </button>
             
-            {/* Notification Dropdown */}
             <NotificationDropdown 
-              isOpen={showNotifications}
-              onClose={() => setShowNotifications(false)}
+              isOpen={showNotifications} 
+              onClose={() => setShowNotifications(false)} 
             />
           </div>
 
-          {/* Language Selector */}
-          <div className="relative" ref={languageMenuRef}>
+          {/* Profile Menu */}
+          <div className="relative" ref={profileMenuRef}>
             <button
-              onClick={() => setShowLanguageMenu(!showLanguageMenu)}
-              className="flex items-center space-x-1 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="flex items-center space-x-2 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             >
-              <Globe className="w-5 h-5" />
-              <ChevronDown className="w-3 h-3" />
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+                {profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="Profile" className="w-8 h-8 rounded-full object-cover" />
+                ) : (
+                  <User className="w-4 h-4 text-white" />
+                )}
+              </div>
+              {/* Username - hidden on mobile, still shows in dropdown */}
+              <span className="hidden md:block text-sm font-medium">{profile?.full_name || user?.email}</span>
+              <ChevronDown className="w-4 h-4 hidden md:block" />
             </button>
             
-            {showLanguageMenu && (
-              <div className="absolute right-0 mt-2 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
-                <button
-                  onClick={() => handleLanguageChange('en')}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg ${
-                    i18n.language === 'en' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {t('language.english')}
-                </button>
-                <button
-                  onClick={() => handleLanguageChange('fr')}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 last:rounded-b-lg ${
-                    i18n.language === 'fr' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  {t('language.french')}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Theme Toggle */}
-          <div className="relative" ref={themeMenuRef}>
-            <button
-              onClick={() => setShowThemeMenu(!showThemeMenu)}
-              className="flex items-center space-x-1 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-            >
-              {React.createElement(themeIcon, { className: "w-5 h-5" })}
-              <ChevronDown className="w-3 h-3" />
-            </button>
-            
-            {showThemeMenu && (
-              <div className="absolute right-0 mt-2 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
-                <button
-                  onClick={() => handleThemeChange('light')}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 first:rounded-t-lg flex items-center space-x-2 ${
-                    theme === 'light' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  <Sun className="w-4 h-4" />
-                  <span>{t('theme.light')}</span>
-                </button>
-                <button
-                  onClick={() => handleThemeChange('dark')}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2 ${
-                    theme === 'dark' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  <Moon className="w-4 h-4" />
-                  <span>{t('theme.dark')}</span>
-                </button>
-                <button
-                  onClick={() => handleThemeChange('system')}
-                  className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 last:rounded-b-lg flex items-center space-x-2 ${
-                    theme === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  <Monitor className="w-4 h-4" />
-                  <span>{t('theme.system')}</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* User Profile Menu */}
-          {user && (
-            <div className="relative" ref={profileMenuRef}>
-              <button
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                className="flex items-center space-x-2 p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              >
-                <div className="w-8 h-8 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
-                  {profile?.avatar_url ? (
-                    <img src={profile.avatar_url} alt={profile.full_name} className="w-8 h-8 rounded-full" />
-                  ) : (
-                    <User className="w-4 h-4" />
-                  )}
-                </div>
-                {/* Hide username on mobile, show on desktop */}
-                <span className="hidden md:block text-sm font-medium">{profile?.full_name || user.email}</span>
-                <ChevronDown className="w-3 h-3" />
-              </button>
-
-              {showProfileMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
-                  <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                      {profile?.full_name || user.email}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {t(`role.${profile?.role || 'collaborator'}`)}
-                    </p>
-                  </div>
-                  
+            {showProfileMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                <div className="py-1">
                   <button
                     onClick={() => {
                       navigate('/profile')
@@ -261,34 +220,38 @@ export function TopNavigation({ onMenuClick }: { onMenuClick: () => void }) {
                     }}
                     className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
                   >
-                    <Settings className="w-4 h-4" />
+                    <User className="w-4 h-4" />
                     <span>{t('nav.profile')}</span>
                   </button>
                   
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        navigate('/settings')
+                        setShowProfileMenu(false)
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                    >
+                      <Settings className="w-4 h-4" />
+                      <span>{t('nav.settings')}</span>
+                    </button>
+                  )}
+                  
+                  <hr className="my-1 border-gray-200 dark:border-gray-700" />
+                  
                   <button
                     onClick={handleSignOut}
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 last:rounded-b-lg flex items-center space-x-2"
+                    className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center space-x-2"
                   >
                     <LogOut className="w-4 h-4" />
-                    <span>{t('nav.logout')}</span>
+                    <span>{t('auth.signOut')}</span>
                   </button>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </nav>
   )
-}
-
-// Close dropdowns when clicking outside
-if (typeof window !== 'undefined') {
-  document.addEventListener('click', (e) => {
-    const target = e.target as Element
-    if (!target.closest('[data-dropdown]')) {
-      // Close all dropdowns
-      // This would be handled by state management in a real app
-    }
-  })
 }
